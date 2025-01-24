@@ -17,8 +17,8 @@ params = dict(
         lr_drop_epochs=None,
         clip_max_norm=0.1,
         sgd=False,
-        num_workers=2),
-
+        num_workers=2
+    ),
     dataset=dict(
         train=dict(
             augmentation=True,
@@ -49,25 +49,30 @@ params = dict(
             gauss_noise=dict(
                 std_range=[0.02, 0.05],
                 mean_range=[0.0, 0.0],
-                p=0.5))),
-
+                p=0.5))
+    ),
     lightning_model=dict(
         module_name='model.lightning_detr',
-        class_name='LitDeformableDETR'),
-
+        class_name='LitDeformableDETR'
+    ),
     core_model=dict(
-        module_name='model.deformable_detr',
-        class_name='DeformableDETR'),
-
+        module_name='model.deformable_segmenter',
+        class_name='DeformableSegmenter',
+    ),
+    # core_model=dict(
+    #     module_name='model.deformable_detr',
+    #     class_name='DeformableDETR',
+    # ),
     backbone=dict(
         module_name='model.backbone',
         class_name=['ResNet50_Clip', 'SwinV2_384'][1],
-        output_layers=['layer2', 'layer3', 'layer4'],
+        output_layers=['layer1', 'layer2', 'layer3', 'layer4'],
         dilation=False,
         position_embedding=dict(
             type='sine',
-            scale=6.283185307179586)),  # 2 * pi
-
+            scale=6.283185307179586  # 2 * pi
+        ),
+    ),
     transformer=dict(
         module_name='model.deformable_transformer',
         class_name='DeformableTransformer',
@@ -86,26 +91,38 @@ params = dict(
         aux_loss=True,
         two_stage=True,
         segmentation=False,
-        frozen_weights=False),
-
+        frozen_weights=False
+    ),
+    transformer_enc_only=dict(
+        module_name='model.transformer_enc_only',
+        class_name='DeformableTransformerEncoderOnly',
+        hidden_dim=256,
+        nheads=8,
+        enc_layers=6,
+        dim_feedforward=1024,
+        dropout=0.1,
+        num_feature_levels=4,
+        enc_n_points=4,
+        aux_loss=True,
+    ),
     matcher=dict(
         module_name='model.matcher',
         class_name='HungarianMatcher',
         class_cost=2,  # TODO check
         bbox_cost=5,
-        giou_cost=2),
-
+        giou_cost=2
+    ),
     postprocessors=dict(
         bbox=dict(
             module_name='model.postprocess',
             class_name='BoxPostProcess', 
             topk=100,
-            score_threshold=0.05),),
-
+            score_threshold=0.05),
+        ),
     criterion=dict(
         module_name='model.criterion',
-        class_name='SetCriterion',),
-
+        class_name='SetCriterion',
+    ),
     losses=dict(
         cls_loss=2,
         bbox_loss=5,
@@ -114,12 +131,12 @@ params = dict(
         dice_loss=1,
         cardinality=True,
         accuracy=True,
-        focal_alpha=0.25),
-
+        focal_alpha=0.25
+    ),
     evaluation=dict(
         topk=100,
-        score_thresh=0.1),
-
+        score_thresh=0.1
+    ),
     runtime=dict(
         output_dir=os.path.join(workspace_path, 'tblog'),
         logger_name='defm_detr',
@@ -128,5 +145,6 @@ params = dict(
         resume='',
         start_epoch=0,
         eval=False,
-        cache_mode=False)
+        cache_mode=False
+    ),
 )

@@ -112,7 +112,7 @@ class SwinV2_384(TimmModel):
     def _post_process(self, features):
         tensors = {}
         for name, feature in features.items():
-        # (B, H, W, C) -> (B, C, H, W)
+            # (B, H, W, C) -> (B, C, H, W)
             feature = feature.permute(0, 3, 1, 2).contiguous()
             B, C, H, W = feature.shape
             mask = torch.zeros((B, H, W), dtype=torch.bool).to(feature.device)

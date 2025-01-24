@@ -19,6 +19,7 @@ from torch.nn.init import xavier_uniform_, constant_, uniform_, normal_
 from util.misc import inverse_sigmoid
 from model.ops.modules import MSDeformAttn
 from util.misc import MLP
+from util.print_util import print_model, print_data
 
 
 class DeformableTransformer(nn.Module):
@@ -146,8 +147,14 @@ class DeformableTransformer(nn.Module):
         return valid_ratio
 
     def forward(self, srcs, masks, pos_embeds, query_embed=None):
+        '''
+        assume that cfg.backbone.output_layers=['layer1', 'layer2', 'layer3', 'layer4'],
+        srcs: list of tensors, [[B, C, H/4, W/4], [B, C, H/8, W/8], [B, C, H/16, W/16], [B, C, H/32, W/32]], C=256
+        masks: list of tensors, [[B, H/4, W/4], [B, H/8, W/8], [B, H/16, W/16], [B, H/32, W/32]]
+        pos_embeds: list of tensors, [[B, C, H/4, W/4], [B, C, H/8, W/8], [B, C, H/16, W/16], [B, C, H/32, W/32]], C=128
+        query_embed: None or tensor, [batch_size, num_queries, 256]
+        '''
         assert self.two_stage or query_embed is not None
-
         # prepare input for encoder
         src_flatten = []
         mask_flatten = []
@@ -157,22 +164,26 @@ class DeformableTransformer(nn.Module):
             bs, c, h, w = src.shape
             spatial_shape = (h, w)
             spatial_shapes.append(spatial_shape)
-            src = src.flatten(2).transpose(1, 2)
+            src = src.flatten(2).transpose(1, 2)  # [B, C, H*W] -> [B, H*W, C]
             mask = mask.flatten(1)
-            pos_embed = pos_embed.flatten(2).transpose(1, 2)
-            lvl_pos_embed = pos_embed + self.level_embed[lvl].view(1, 1, -1)
+            pos_embed = pos_embed.flatten(2).transpose(1, 2)  # [B, C, H*W] -> [B, H*W, C]
+            lvl_pos_embed = pos_embed + self.level_embed[lvl].view(1, 1, -1)  # [B, H*W, C] + [C] -> [B, H*W, C]
             lvl_pos_embed_flatten.append(lvl_pos_embed)
             src_flatten.append(src)
             mask_flatten.append(mask)
-        src_flatten = torch.cat(src_flatten, 1)
-        mask_flatten = torch.cat(mask_flatten, 1)
-        lvl_pos_embed_flatten = torch.cat(lvl_pos_embed_flatten, 1)
-        spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=src_flatten.device)
+        src_flatten = torch.cat(src_flatten, 1)  # [B, sum(H*W), C]
+        mask_flatten = torch.cat(mask_flatten, 1)  # [B, sum(H*W)]
+        lvl_pos_embed_flatten = torch.cat(lvl_pos_embed_flatten, 1)  # [B, sum(H*W), C]
+        spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=src_flatten.device)  # [L, 2], L=num levels=4
+        # level_start_index: [L,] [0, H0*W0, sum_i=0~1_Hi*Wi, sum_i=0~2_Hi*Wi, sum_i=0~3_Hi*Wi], e.g. [0, 9216, 11520, 12096]
         level_start_index = torch.cat((spatial_shapes.new_zeros((1, )), spatial_shapes.prod(1).cumsum(0)[:-1]))
         valid_ratios = torch.stack([self.get_valid_ratio(m) for m in masks], 1)
 
         # encoder
+        print_data(src_flatten, title='src_flatten')
+        print('level start index:', level_start_index)
         memory = self.encoder(src_flatten, spatial_shapes, level_start_index, valid_ratios, lvl_pos_embed_flatten, mask_flatten)
+        print_data(memory, title='memory')
 
         # prepare input for decoder
         bs, _, c = memory.shape

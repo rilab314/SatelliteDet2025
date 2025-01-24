@@ -137,6 +137,9 @@ class DeformableDETR(nn.Module):
         if not isinstance(samples, NestedTensor):
             samples = nested_tensor_from_tensor_list(samples)
         features, pos = self.backbone(samples)
+        # assume that cfg.backbone.output_layers=['layer1', 'layer2', 'layer3', 'layer4'],
+        # features: NestedTensor [[B, C, H/4, W/4], [B, 2C, H/8, W/8], [B, 4C, H/16, W/16], [B, 8C, H/32, W/32]], C=128 for SwinV2_384
+        # pos: tensor [[B, D, H/4, W/4], [B, D, H/8, W/8], [B, D, H/16, W/16], [B, D, H/32, W/32]]
 
         srcs = []
         masks = []

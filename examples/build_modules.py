@@ -60,12 +60,12 @@ def check_defm_detr_outputs():
         print_data(targets, title='targets')
         outputs = model(samples)
         print_data(outputs, title='outputs')
-        loss = criterion(outputs, targets)
-        print_data(loss, title='loss')
+        # loss = criterion(outputs, targets)
+        # print_data(loss, title='loss')
         break
 
 
 if __name__ == "__main__":
-    create_modules()
-    check_backbone_outputs()
+    # create_modules()
+    # check_backbone_outputs()
     check_defm_detr_outputs()
