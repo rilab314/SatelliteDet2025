@@ -226,3 +226,17 @@ class SetCriterion(nn.Module):
         batch_idx = torch.cat([torch.full_like(tgt, i) for i, (_, tgt) in enumerate(indices)])
         tgt_idx = torch.cat([tgt for (_, tgt) in indices])
         return batch_idx, tgt_idx
+
+
+class SegmentationCriterion(nn.Module):
+    @staticmethod
+    def build_from_cfg(cfg):
+        matcher = build_instance(cfg.matcher.module_name, cfg.matcher.class_name, cfg)
+        losses = cfg.losses.to_dict()
+        losses = [k for k, v in losses.items() if k != 'focal_alpha' and v != 0 and v != False]
+        return SegmentationCriterion(
+            num_classes=cfg.dataset.num_classes,
+            matcher=matcher,
+            loss_names=losses,
+            focal_alpha=cfg.losses.focal_alpha
+        )

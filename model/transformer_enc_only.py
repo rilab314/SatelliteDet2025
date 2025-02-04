@@ -26,13 +26,13 @@ class DeformableTransformerEncoderOnly(nn.Module):
     def build_from_cfg(cfg):
         return DeformableTransformerEncoderOnly(
             num_classes=cfg.dataset.num_classes,
-            d_model=cfg.transformer_enc_only.hidden_dim,
-            nhead=cfg.transformer_enc_only.nheads,
-            num_encoder_layers=cfg.transformer_enc_only.enc_layers,
-            dim_feedforward=cfg.transformer_enc_only.dim_feedforward,
-            dropout=cfg.transformer_enc_only.dropout,
-            num_feature_levels=cfg.transformer_enc_only.num_feature_levels,
-            enc_n_points=cfg.transformer_enc_only.enc_n_points,
+            d_model=cfg.transformer.hidden_dim,
+            nhead=cfg.transformer.nheads,
+            num_encoder_layers=cfg.transformer.enc_layers,
+            dim_feedforward=cfg.transformer.dim_feedforward,
+            dropout=cfg.transformer.dropout,
+            num_feature_levels=cfg.transformer.num_feature_levels,
+            enc_n_points=cfg.transformer.enc_n_points,
         )
 
     def __init__(self, num_classes: int, d_model=256, nhead=8, num_encoder_layers=6, dim_feedforward=1024, dropout=0.1,

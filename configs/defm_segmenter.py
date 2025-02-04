@@ -56,8 +56,8 @@ params = dict(
         class_name='LitDeformableDETR'
     ),
     core_model=dict(
-        module_name='model.deformable_detr',
-        class_name='DeformableDETR',
+        module_name='model.deformable_segmenter',
+        class_name='DetrLaneDetector',
     ),
     backbone=dict(
         module_name='model.backbone',
@@ -70,26 +70,6 @@ params = dict(
         ),
     ),
     transformer=dict(
-        module_name='model.deformable_transformer',
-        class_name='DeformableTransformer',
-        enc_layers=6,
-        dec_layers=6,
-        num_feature_levels=4,
-        dim_feedforward=1024,
-        hidden_dim=256,
-        dropout=0.1,
-        nheads=8,
-        num_queries=300,
-        dec_n_points=4,
-        enc_n_points=4,
-        return_intermediate_dec=True,
-        with_box_refine=False,
-        aux_loss=True,
-        two_stage=True,
-        segmentation=False,
-        frozen_weights=False
-    ),
-    transformer_enc_only=dict(
         module_name='model.transformer_enc_only',
         class_name='DeformableTransformerEncoderOnly',
         hidden_dim=256,
@@ -99,7 +79,6 @@ params = dict(
         dropout=0.1,
         num_feature_levels=4,
         enc_n_points=4,
-        aux_loss=True,
     ),
     matcher=dict(
         module_name='model.matcher',
@@ -108,25 +87,14 @@ params = dict(
         bbox_cost=5,
         giou_cost=2
     ),
-    postprocessors=dict(
-        bbox=dict(
-            module_name='model.postprocess',
-            class_name='BoxPostProcess', 
-            topk=100,
-            score_threshold=0.05),
-        ),
     criterion=dict(
         module_name='model.criterion',
-        class_name='SetCriterion',
+        class_name='SegmentationCriterion',
     ),
     losses=dict(
-        cls_loss=2,
-        bbox_loss=5,
-        giou_loss=2,
-        mask_loss=1,
-        dice_loss=1,
-        cardinality=True,
-        accuracy=True,
+        cls_loss=1,
+        binary_loss=1,
+        reg_loss=1,
         focal_alpha=0.25
     ),
     evaluation=dict(

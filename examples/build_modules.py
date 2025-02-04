@@ -2,14 +2,10 @@ import multiprocessing
 if __name__ == '__main__':
     multiprocessing.set_start_method('spawn', force=True)
 
-import numpy as np
-import torch
-from torch.utils.data import DataLoader
-
 import settings
 from configs.config import CfgNode
 from util.print_util import print_model, print_data
-from util.misc import NestedTensor, nested_tensor_from_batch_data, build_instance
+from util.misc import build_instance
 from pipeline.dataloader import create_dataloader
 
 
@@ -60,12 +56,26 @@ def check_defm_detr_outputs():
         print_data(targets, title='targets')
         outputs = model(samples)
         print_data(outputs, title='outputs')
-        # loss = criterion(outputs, targets)
-        # print_data(loss, title='loss')
+        break
+
+
+def check_defm_segmenter_outputs():
+    cfg = CfgNode.from_file('defm_segmenter')
+    dataloader = create_dataloader(cfg, 'val')
+    model = build_instance(cfg.lightning_model.module_name, cfg.lightning_model.class_name, cfg)
+    # criterion = build_instance(cfg.criterion.module_name, cfg.criterion.class_name, cfg)
+    for k, batch in enumerate(dataloader):
+        print(f"===== Batch {k + 1}/{len(dataloader)} =====")
+        samples, targets = batch
+        print_data(samples, title='samples')
+        print_data(targets, title='targets')
+        outputs = model(samples)
+        print_data(outputs, title='outputs')
         break
 
 
 if __name__ == "__main__":
     # create_modules()
     # check_backbone_outputs()
-    check_defm_detr_outputs()
+    # check_defm_detr_outputs()
+    check_defm_segmenter_outputs()
