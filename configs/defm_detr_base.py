@@ -89,17 +89,12 @@ params = dict(
         segmentation=False,
         frozen_weights=False
     ),
-    transformer_enc_only=dict(
-        module_name='model.transformer_enc_only',
-        class_name='DeformableTransformerEncoderOnly',
-        hidden_dim=256,
-        nheads=8,
-        enc_layers=6,
-        dim_feedforward=1024,
-        dropout=0.1,
-        num_feature_levels=4,
-        enc_n_points=4,
-        aux_loss=True,
+    postprocessors=dict(
+        bbox=dict(
+            module_name='model.postprocess',
+            class_name='BoxPostProcess', 
+            topk=100,
+            score_threshold=0.05),
     ),
     matcher=dict(
         module_name='model.matcher',
@@ -108,13 +103,6 @@ params = dict(
         bbox_cost=5,
         giou_cost=2
     ),
-    postprocessors=dict(
-        bbox=dict(
-            module_name='model.postprocess',
-            class_name='BoxPostProcess', 
-            topk=100,
-            score_threshold=0.05),
-        ),
     criterion=dict(
         module_name='model.criterion',
         class_name='SetCriterion',

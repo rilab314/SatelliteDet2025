@@ -228,6 +228,9 @@ class SetCriterion(nn.Module):
         return batch_idx, tgt_idx
 
 
+from model.dto import LaneDetOutput
+
+
 class SegmentationCriterion(nn.Module):
     @staticmethod
     def build_from_cfg(cfg):
@@ -240,3 +243,29 @@ class SegmentationCriterion(nn.Module):
             loss_names=losses,
             focal_alpha=cfg.losses.focal_alpha
         )
+
+    def __init__(self, num_classes, matcher, loss_names: List[str], focal_alpha=0.25):
+        super().__init__()
+        self.num_classes = num_classes
+        self.matcher = matcher
+        self.loss_names = loss_names
+        self.focal_alpha = focal_alpha
+
+    def forward(self, output: LaneDetOutput, target: LaneDetOutput):
+        '''
+        segm_logit: torch.Tensor  # (B, H, W, K), K=number of classes
+        side_logits: List[torch.Tensor]  # [(B, H, W, 1), (B, H, W, 1)], endness of two sides
+        center_point: torch.Tensor  # (B, H, W, 2), point on line in this grid
+        side_points: List[torch.Tensor]  # [(B, H, W, 2), (B, H, W, 2)], point on line in side grids
+        line_strings: List[List[LineString]]
+        '''
+        # TODO : implement losses
+        # segmentation loss (segm_logit)
+        # center point loss (center_point)
+        # side matcher
+        # side endness loss (side_logits)
+        # side point loss (side_points)
+        # line string loss (line_strings)
+        
+        # output = side_matcher(output, target)
+        pass

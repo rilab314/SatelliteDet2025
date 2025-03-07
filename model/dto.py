@@ -11,7 +11,7 @@ class LineString:
 
 
 @dataclass
-class DetectorOutput:
+class LaneDetOutput:
     segm_logit: torch.Tensor  # (B, H, W, K), K=number of classes
     side_logits: List[torch.Tensor]  # [(B, H, W, 1), (B, H, W, 1)], endness of two sides
     center_point: torch.Tensor  # (B, H, W, 2), point on line in this grid

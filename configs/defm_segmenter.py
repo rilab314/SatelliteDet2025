@@ -80,10 +80,17 @@ params = dict(
         num_feature_levels=4,
         enc_n_points=4,
     ),
-    matcher=dict(
+    postprocessors=dict(
+        line=dict(
+            module_name='model.instance_generator',
+            class_name='LineStringInstanceGenerator', 
+            topk=100,
+            score_threshold=0.05),
+    ),
+    matcher=dict(  # TODO : matcher 가 필요한가? 어떤 matcher가 필요한가?
         module_name='model.matcher',
         class_name='HungarianMatcher',
-        class_cost=2,  # TODO check
+        class_cost=2,
         bbox_cost=5,
         giou_cost=2
     ),

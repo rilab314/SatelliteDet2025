@@ -1,19 +1,22 @@
 from typing import List, Tuple
 import torch
+from torch import nn
 import torch.nn.functional as F
 
-from model.dto import DetectorOutput, LineString
+from model.dto import LaneDetOutput, LineString
 
 
-class LineStringInstanceGenerator:
+# TODO : 구현은 했지만 검증이 필요함
+class LineStringInstanceGenerator(nn.Module):
     @staticmethod
     def build_from_cfg(cfg):
         return LineStringInstanceGenerator()
 
     def __init__(self):
-        pass
+        super().__init__()
 
-    def generate(self, output: DetectorOutput) -> List[LineString]:
+    @torch.no_grad()
+    def forward(self, output: LaneDetOutput) -> List[LineString]:
         points, class_ids, scores = self._find_peaks(output.segm_logit)
         output.line_strings = self._find_lines(output, points, class_ids, scores)
         return output
@@ -90,9 +93,9 @@ class LineStringInstanceGenerator:
             scores_list.append(scores)
         return points_list, class_ids_list, scores_list
 
-    def _find_lines(self, output: DetectorOutput, points: List[torch.Tensor], class_ids: List[torch.Tensor], scores: List[torch.Tensor]) -> List[List[LineString]]:
+    def _find_lines(self, output: LaneDetOutput, points: List[torch.Tensor], class_ids: List[torch.Tensor], scores: List[torch.Tensor]) -> List[List[LineString]]:
         '''
-        output: DetectorOutput
+        output: LaneDetOutput
         points: List[Tensor], length=B, shape=(N, 2)
         class_ids: List[Tensor], length=B, shape=(N,)
         scores: List[Tensor], length=B, shape=(N,)

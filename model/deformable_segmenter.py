@@ -7,9 +7,9 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 # ------------------------------------------------------------------------
 
-"""
+'''
 Deformable DETR model and criterion classes.
-"""
+'''
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -20,14 +20,14 @@ from dataclasses import dataclass
 from util.misc import NestedTensor
 from util.misc import MLP, build_instance
 from util.print_util import print_data
-from model.dto import DetectorOutput, LineString
+from model.dto import LaneDetOutput, LineString
 
 def _get_clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
 
 
 class DetrLaneDetector(nn.Module):
-    """ This is the Deformable DETR module that performs object detection """
+    ''' This is the Deformable DETR module that performs object detection '''
     @staticmethod
     def build_from_cfg(cfg):
         backbone = build_instance(cfg.backbone.module_name, cfg.backbone.class_name, cfg)
@@ -41,15 +41,13 @@ class DetrLaneDetector(nn.Module):
         return model
 
     def __init__(self, backbone, transformer, num_classes: int, num_feature_levels: int):
-        """ Initializes the model.
+        ''' Initializes the model.
         Parameters:
             backbone: torch module of the backbone to be used. See backbone.py
             transformer: torch module of the transformer architecture. See transformer.py
             num_classes: number of object classes
-            aux_loss: True if auxiliary decoding losses (loss at each decoder layer) are to be used.
-            with_box_refine: iterative bounding box refinement
-            two_stage: two-stage Deformable DETR
-        """
+            num_feature_levels: number of feature levels
+        '''
         super().__init__()
         self.transformer = transformer
         hidden_dim = transformer.d_model
@@ -57,7 +55,7 @@ class DetrLaneDetector(nn.Module):
         self.input_proj = self._get_input_proj(backbone, hidden_dim, num_feature_levels)
         self.output_proj = self._get_output_proj(hidden_dim, num_classes)
         self.backbone = backbone
-    
+
     def _get_input_proj(self, backbone, hidden_dim, num_feature_levels):
         if num_feature_levels > 1:
             num_backbone_outs = len(backbone.strides)
@@ -132,7 +130,7 @@ class DetrLaneDetector(nn.Module):
         outputs = self.process_outputs(memory, feat_hw)
         return outputs
     
-    def process_outputs(self, memory, feat_hw) -> DetectorOutput:
+    def process_outputs(self, memory, feat_hw) -> LaneDetOutput:
         num_feat = feat_hw[0] * feat_hw[1]
         src = memory[:, :num_feat, :]
         side_scale = 6.0
@@ -147,5 +145,5 @@ class DetrLaneDetector(nn.Module):
         reg_out = reg_out.reshape(reg_out.shape[0], feat_hw[0], feat_hw[1], -1)
         outputs['center_point'] = F.sigmoid(reg_out[..., :2]) * 1.2 - 0.1  # [-0.1, 1.1]
         outputs['side_points'] = [(F.sigmoid(reg_out[..., 2:4]) - 0.5) * side_scale, (F.sigmoid(reg_out[..., 4:6]) - 0.5) * side_scale]  # [-3, 3]
-        outputs = DetectorOutput(**outputs)
+        outputs = LaneDetOutput(**outputs)
         return outputs

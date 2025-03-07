@@ -22,8 +22,11 @@ class LitDeformableDETR(pl.LightningModule):
     def build_from_cfg(cfg):
         model = build_instance(cfg.core_model.module_name, cfg.core_model.class_name, cfg)
         criterion = build_instance(cfg.criterion.module_name, cfg.criterion.class_name, cfg)
-        box_postprocessor = build_instance(cfg.postprocessors.bbox.module_name, cfg.postprocessors.bbox.class_name, cfg)
-        postprocessors = {"bbox": box_postprocessor}
+        postproc_cfg = cfg.postprocessors.to_dict()
+        postprocessors = {}
+        for key, val in postproc_cfg.items():
+            postproc = build_instance(val['module_name'], val['class_name'], cfg)
+            postprocessors[key] = postproc
         model = LitDeformableDETR(cfg, model, criterion, postprocessors)
         device = torch.device(cfg.runtime.device)
         model.to(device)
@@ -31,11 +34,6 @@ class LitDeformableDETR(pl.LightningModule):
 
     def __init__(self, cfg, model=None, criterion=None, postprocessors=None):
         super().__init__()
-        if model is None:
-            model = build_instance(cfg.core_model.module_name, cfg.core_model.class_name, cfg)
-            criterion = build_instance(cfg.criterion.module_name, cfg.criterion.class_name, cfg)
-            box_postprocessor = build_instance(cfg.postprocessors.bbox.module_name, cfg.postprocessors.bbox.class_name, cfg)
-            postprocessors = {"bbox": box_postprocessor}
         self.model = model
         self.criterion = criterion
         self.postprocessors = postprocessors
@@ -70,13 +68,17 @@ class LitDeformableDETR(pl.LightningModule):
             factor = self.loss_weights.get(k, 1.0)
             self.log(f"val_{k}", v * factor, prog_bar=False, batch_size=self.cfg.training.batch_size)
 
-        # metric evaluation을 위한 형식 변환 및 버퍼 저장
-        target_sizes, image_ids = get_sizes_and_ids(targets, outputs["pred_logits"].device)
-        coco_dets = self.postprocessors["bbox"](outputs, target_sizes, image_ids)
-        self._outputs_buffer.extend(coco_dets)
+        if 'bbox' in self.postprocessors:
+            # metric evaluation을 위한 형식 변환 및 버퍼 저장
+            target_sizes, image_ids = get_sizes_and_ids(targets, outputs["pred_logits"].device)
+            coco_dets = self.postprocessors["bbox"](outputs, target_sizes, image_ids)
+            self._outputs_buffer.extend(coco_dets)
+        
+        # TODO : LineStringInstanceGenerator 로 lane instance 추출해서 수집 or segmentation map 수집
         return losses
 
     def on_validation_epoch_end(self):
+        # TODO : segmentation map 을 COCO format으로 변환하고 성능 평가
         if len(self._outputs_buffer) == 0:
             print("No predictions for validation, skip COCO eval.")
             return
