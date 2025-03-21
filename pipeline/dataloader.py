@@ -9,19 +9,19 @@ def custom_collate_fn(batch: List[dict]):
     """
     batch는 Dataset에서 반환한 dict들의 리스트
     [
-      {
-        'image': Tensor(3, H, W),
-        'targets': { 'boxes': Tensor(N,4), 'labels': Tensor(N,) },
-        'height': int,
-        'width': int,
-        'filename': str
-      },
-      ...
+        {
+            'image': Tensor(3, H, W),
+            'targets': { 'boxes': Tensor(N,4), 'labels': Tensor(N,) },
+            'height': int,
+            'width': int,
+            'filename': str
+        },
+        ...
     ]
 
     이걸 Deformable DETR가 원하는 형태로 맞춘다:
-      samples = NestedTensor(batch_images, batch_masks)
-      targets = List[Dict], 각 이미지별 box, label, size 등
+        samples = NestedTensor(batch_images, batch_masks)
+        targets = List[Dict], 각 이미지별 box, label, size 등
     """
     # NestedTensor 생성
     images = [item['image'] for item in batch]
