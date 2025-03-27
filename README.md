@@ -6,7 +6,7 @@
 │   └── soccer-players
 ├── RilabDetrBase
 │   ├── configs
-│   ├── datasets
+│   ├── dataset
 │   ├── model
 │   ├── pipeline
 │   └── util

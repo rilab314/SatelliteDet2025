@@ -11,7 +11,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-from datasets.composer_factory import composer_factory
+from dataset.composer_factory import composer_factory
 
 
 class SoccerPlayersDataset(Dataset):

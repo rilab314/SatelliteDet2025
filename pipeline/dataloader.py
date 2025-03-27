@@ -2,7 +2,7 @@ import torch
 from typing import List
 from util.misc import nested_tensor_from_tensor_list
 from torch.utils.data import DataLoader
-from datasets import build_dataset
+from dataset import build_dataset
 
 
 def custom_collate_fn(batch: List[dict]):

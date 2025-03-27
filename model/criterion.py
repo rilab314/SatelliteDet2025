@@ -22,6 +22,17 @@ import copy
 from util.misc import build_instance
 
 
+def direction_loss(curr, next_, target_curr, target_next, mask=None):
+    vec_pred = next_ - curr
+    vec_gt = target_next - target_curr
+    dot = (vec_pred * vec_gt).sum(1, keepdim=True)
+    norm_pred = vec_pred.norm(dim=1, keepdim=True)
+    norm_gt = vec_gt.norm(dim=1, keepdim=True)
+    cos_sim = dot / (norm_pred * norm_gt + 1e-6)
+    loss = 1 - cos_sim
+    return loss * mask if mask is not None else loss
+
+
 class SetCriterion(nn.Module):
     @staticmethod
     def build_from_cfg(cfg):
@@ -252,20 +263,52 @@ class SegmentationCriterion(nn.Module):
         self.focal_alpha = focal_alpha
 
     def forward(self, output: LaneDetOutput, target: LaneDetOutput):
-        '''
-        segm_logit: torch.Tensor  # (B, H, W, K), K=number of classes
-        side_logits: List[torch.Tensor]  # [(B, H, W, 1), (B, H, W, 1)], endness of two sides
-        center_point: torch.Tensor  # (B, H, W, 2), point on line in this grid
-        side_points: List[torch.Tensor]  # [(B, H, W, 2), (B, H, W, 2)], point on line in side grids
-        line_strings: List[List[LineString]]
-        '''
-        # TODO : implement losses
-        # segmentation loss (segm_logit)
-        # center point loss (center_point)
-        # side matcher
-        # side endness loss (side_logits)
-        # side point loss (side_points)
-        # line string loss (line_strings)
-        
-        # output = side_matcher(output, target)
-        pass
+        # unpack
+        pred_cls = output.segm_logit.permute(0, 3, 1, 2)  # (B, K, H, W)
+        target_cls = target.segm_logit.argmax(dim=-1).long()  # (B, H, W)
+
+        pred_center = output.center_point.permute(0, 3, 1, 2)  # (B, 2, H, W)
+        target_center = target.center_point.permute(0, 3, 1, 2)
+
+        pred_sides = [p.permute(0, 3, 1, 2) for p in output.side_points]  # 2x (B, 2, H, W)
+        target_sides = [p.permute(0, 3, 1, 2) for p in target.side_points]
+
+        pred_ends = [p.permute(0, 3, 1, 2) for p in output.side_logits]  # 2x (B, 1, H, W)
+        target_ends = [p.permute(0, 3, 1, 2) for p in target.side_logits]
+
+        # (optional) importance map 생성 (ARSL 적용 시)
+        # importance_map = self.rsn(image, pred_cls.softmax(dim=1))  # (B, 1, H, W)
+
+        # --------- LOSS 계산 ---------
+        # 1. segmentation loss
+        segm_loss = F.cross_entropy(pred_cls, target_cls, reduction='none').unsqueeze(1)
+
+        # 2. center point loss
+        center_loss = F.smooth_l1_loss(pred_center, target_center, reduction='none').mean(1, keepdim=True)
+
+        # 3. side point loss + 존재 여부 mask
+        is_not_start = (target_ends[0] < 0.5).float()
+        is_not_end = (target_ends[1] < 0.5).float()
+
+        side_loss_prev = F.smooth_l1_loss(pred_sides[0], target_sides[0], reduction='none').mean(1, keepdim=True) * is_not_start
+        side_loss_next = F.smooth_l1_loss(pred_sides[1], target_sides[1], reduction='none').mean(1, keepdim=True) * is_not_end
+
+        # 4. direction loss (center → next)
+        dir_loss = direction_loss(pred_center, pred_sides[1], target_center, target_sides[1], mask=is_not_end)
+
+        # 5. start/end classification (BCE)
+        bin_pred = torch.cat(pred_ends, dim=1)      # Bx2xHxW
+        bin_target = torch.cat(target_ends, dim=1)
+        bin_loss = F.binary_cross_entropy_with_logits(bin_pred, bin_target, reduction='none').mean(1, keepdim=True)
+
+        # 6. pixel-wise 총합 (중요도 적용 전)
+        pixel_loss = center_loss + side_loss_prev + side_loss_next + dir_loss + bin_loss + segm_loss
+
+        # 7. ARSL 적용 (optional)
+        if hasattr(self, 'rsn'):
+            importance_map = self.rsn(...)  # 예: image, pred_cls
+            total_loss = (importance_map * pixel_loss).mean()
+        else:
+            total_loss = pixel_loss.mean()
+
+        return {"loss_total": total_loss}
