@@ -3,10 +3,8 @@ import cv2
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-from detectron2.structures import Instances, Boxes
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
-from detectron2.config import get_cfg, CfgNode
 
 
 def composer_factory(cfg, split: str):
