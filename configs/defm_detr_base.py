@@ -99,7 +99,7 @@ params = dict(
     matcher=dict(
         module_name='model.matcher',
         class_name='HungarianMatcher',
-        class_cost=2,  # TODO check
+        class_cost=2,
         bbox_cost=5,
         giou_cost=2
     ),

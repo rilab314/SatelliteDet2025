@@ -27,7 +27,7 @@ class LitDeformableDETR(pl.LightningModule):
         for key, val in postproc_cfg.items():
             postproc = build_instance(val['module_name'], val['class_name'], cfg)
             postprocessors[key] = postproc
-        model = LitDeformableDETR(cfg, model, criterion, postprocessors)
+        model = LitDeformableDETR(cfg, model, criterion)
         device = torch.device(cfg.runtime.device)
         model.to(device)
         return model
@@ -42,9 +42,6 @@ class LitDeformableDETR(pl.LightningModule):
         self.save_hyperparameters(ignore=['model', 'criterion'])
         n_parameters = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         print(f"[LitDeformableDETR] Number of params: {n_parameters}")
-        val_split = "val"
-        self.val_annotation_path = os.path.join(cfg.dataset.path, val_split, cfg.dataset[val_split].coco_ann_file)
-        self._outputs_buffer = []  # COCO detection 결과 저장
 
     def forward(self, samples):
         return self.model(samples)
@@ -53,56 +50,30 @@ class LitDeformableDETR(pl.LightningModule):
         samples, targets = batch
         outputs = self(samples)
         loss_dict = self.criterion(outputs, targets)
-        losses = sum(loss_dict[k] * self.loss_weights.get(k, 1.0) for k in loss_dict)
         for k, v in loss_dict.items():
             factor = self.loss_weights.get(k, 1.0)
             self.log(f"train_{k}", v * factor, prog_bar=False, batch_size=self.cfg.training.batch_size)
-        return losses
+        total_loss = sum(loss_dict[k] * self.loss_weights.get(k, 0) for k in loss_dict)
+        self.log(f"train_total_loss", total_loss, prog_bar=False, batch_size=self.cfg.training.batch_size)
+        return total_loss
 
     def validation_step(self, batch, batch_idx):
         samples, targets = batch
         outputs = self(samples)
         loss_dict = self.criterion(outputs, targets)
-        losses = sum(loss_dict[k] * self.loss_weights.get(k, 1.0) for k in loss_dict)
         for k, v in loss_dict.items():
             factor = self.loss_weights.get(k, 1.0)
             self.log(f"val_{k}", v * factor, prog_bar=False, batch_size=self.cfg.training.batch_size)
+        total_loss = sum(loss_dict[k] * self.loss_weights.get(k, 0) for k in loss_dict)
+        self.log(f"val_total_loss", total_loss, prog_bar=False, batch_size=self.cfg.training.batch_size)
+        # TODO eval per frame performance
 
-        if 'bbox' in self.postprocessors:
-            # metric evaluation을 위한 형식 변환 및 버퍼 저장
-            target_sizes, image_ids = get_sizes_and_ids(targets, outputs["pred_logits"].device)
-            coco_dets = self.postprocessors["bbox"](outputs, target_sizes, image_ids)
-            self._outputs_buffer.extend(coco_dets)
-        
         # TODO : LineStringInstanceGenerator 로 lane instance 추출해서 수집 or segmentation map 수집
-        return losses
+        return total_loss
 
     def on_validation_epoch_end(self):
-        # TODO : segmentation map 을 COCO format으로 변환하고 성능 평가
-        if len(self._outputs_buffer) == 0:
-            print("No predictions for validation, skip COCO eval.")
-            return
-
-        assert self.logger is not None and hasattr(self.logger, "log_dir"), "Logger is not initialized"
-        pred_json_path = os.path.join(self.logger.log_dir, f"val_predictions.json")
-        with open(pred_json_path, 'w') as f:
-            json.dump(self._outputs_buffer, f)
-
-        coco_gt = COCO(self.val_annotation_path)
-        coco_dt = coco_gt.loadRes(pred_json_path)
-
-        coco_eval = COCOeval(coco_gt, coco_dt, iouType='bbox')
-        coco_eval.evaluate()
-        coco_eval.accumulate()
-        coco_eval.summarize()
-        map_50_95 = coco_eval.stats[0]
-        map_50    = coco_eval.stats[1]
-        self.log("coco/AP", map_50_95, sync_dist=True)
-        self.log("coco/AP50", map_50, sync_dist=True)
-        print(f"[Epoch {self.current_epoch}] COCO AP: {map_50_95:.4f}, AP50: {map_50:.4f}")
-
-        # 3) 버퍼 초기화
-        self._outputs_buffer.clear()
+        # TODO implement performance eval
+        pass
 
     def configure_optimizers(self):
         lr = self.cfg.training.lr

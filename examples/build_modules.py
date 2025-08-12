@@ -11,11 +11,13 @@ from pipeline.dataloader import create_dataloader
 
 def create_modules():
     print('\n========== config ==========\n')
-    cfg = CfgNode.from_file('defm_detr_base')
+    cfg = CfgNode.from_file('satellite_detr')
     # print(cfg)
     print('\n========== backbone ==========\n')
     backbone = build_instance(cfg.backbone.module_name, cfg.backbone.class_name, cfg)
     print_model(backbone, max_depth=4)
+    print(type(backbone))
+    exit()
     print('\n========== detr ==========\n')
     detr = build_instance(cfg.transformer.module_name, cfg.transformer.class_name, cfg)
     print_model(detr, max_depth=3)
@@ -31,7 +33,7 @@ def create_modules():
 
 
 def check_backbone_outputs():
-    cfg = CfgNode.from_file('defm_detr_base')
+    cfg = CfgNode.from_file('satellite_detr')
     dataloader = create_dataloader(cfg, 'val')
     backbone = build_instance(cfg.backbone.module_name, cfg.backbone.class_name, cfg)
     for k, batch in enumerate(dataloader):
@@ -76,6 +78,6 @@ def check_defm_segmenter_outputs():
 
 if __name__ == "__main__":
     # create_modules()
-    # check_backbone_outputs()
+    check_backbone_outputs()
     # check_defm_detr_outputs()
-    check_defm_segmenter_outputs()
+    # check_defm_segmenter_outputs()

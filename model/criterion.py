@@ -22,226 +22,6 @@ import copy
 from util.misc import build_instance
 
 
-def direction_loss(curr, next_, target_curr, target_next, mask=None):
-    vec_pred = next_ - curr
-    vec_gt = target_next - target_curr
-    dot = (vec_pred * vec_gt).sum(1, keepdim=True)
-    norm_pred = vec_pred.norm(dim=1, keepdim=True)
-    norm_gt = vec_gt.norm(dim=1, keepdim=True)
-    cos_sim = dot / (norm_pred * norm_gt + 1e-6)
-    loss = 1 - cos_sim
-    return loss * mask if mask is not None else loss
-
-
-class SetCriterion(nn.Module):
-    @staticmethod
-    def build_from_cfg(cfg):
-        matcher = build_instance(cfg.matcher.module_name, cfg.matcher.class_name, cfg)
-        losses = cfg.losses.to_dict()
-        losses = [k for k, v in losses.items() if k != 'focal_alpha' and v != 0 and v != False]
-        if cfg.transformer.segmentation is False:
-            losses.remove('mask_loss')
-            losses.remove('dice_loss')
-        return SetCriterion(
-            num_classes=cfg.dataset.num_classes,
-            matcher=matcher,
-            loss_names=losses,
-            focal_alpha=cfg.losses.focal_alpha
-        )
-
-    ''' This class computes the loss for DETR.
-    The process happens in two steps:
-        1) we compute hungarian assignment between ground truth boxes and the outputs of the model
-        2) we supervise each pair of matched ground-truth / prediction (supervise class and box)
-    '''
-    def __init__(self, num_classes, matcher, loss_names: List[str], focal_alpha=0.25):
-        ''' Create the criterion.
-        Parameters:
-            num_classes: number of object categories, omitting the special no-object category
-            matcher: module able to compute a matching between targets and proposals
-            loss_names: list containing the names of the losses
-            focal_alpha: alpha in Focal Loss
-        '''
-        super().__init__()
-        self.num_classes = num_classes
-        self.matcher = matcher
-        self.loss_names = loss_names
-        self.focal_alpha = focal_alpha  # TODO check
-
-    def forward(self, outputs, targets):
-        ''' This performs the loss computation.
-        Parameters:
-             outputs: dict of tensors, see the output specification of the model for the format
-             targets: list of dicts, such that len(targets) == batch_size.
-                      The expected keys in each dict depends on the losses applied, see each loss' doc
-        '''
-        outputs_without_aux = {k: v for k, v in outputs.items() if k != 'aux_outputs' and k != 'enc_outputs'}
-
-        # Retrieve the matching between the outputs of the last layer and the targets
-        indices = self.matcher(outputs_without_aux, targets)
-
-        # Compute the average number of target boxes accross all nodes, for normalization purposes
-        num_boxes = sum(len(t["labels"]) for t in targets)
-        num_boxes = torch.as_tensor([num_boxes], dtype=torch.float, device=next(iter(outputs.values())).device)
-        if is_dist_avail_and_initialized():
-            torch.distributed.all_reduce(num_boxes)
-        num_boxes = torch.clamp(num_boxes / get_world_size(), min=1).item()
-
-        # Compute all the requested losses
-        losses = self.get_losses(self.loss_names, outputs, targets, indices, num_boxes)
-
-        # In case of auxiliary losses, we repeat this process with the output of each intermediate layer.
-        if 'aux_outputs' in outputs:
-            for i, aux_outputs in enumerate(outputs['aux_outputs']):
-                indices = self.matcher(aux_outputs, targets)
-                loss_names = [k for k in self.loss_names if k != 'masks']  # mask loss is too costly for intermediate layers
-                kwargs = {'log': False} if 'accuracy' in loss_names else {}
-                aux_losses = self.get_losses(loss_names, aux_outputs, targets, indices, num_boxes, **kwargs)
-                aux_losses = {k + f'_{i}': v for k, v in aux_losses.items()}
-                losses.update(aux_losses)
-
-        if 'enc_outputs' in outputs:
-            enc_outputs = outputs['enc_outputs']
-            bin_targets = copy.deepcopy(targets)
-            for bt in bin_targets:
-                bt['labels'] = torch.zeros_like(bt['labels'])
-            indices = self.matcher(enc_outputs, bin_targets)
-            loss_names = [k for k in self.loss_names if k != 'masks']  # mask loss is too costly for intermediate layers
-            kwargs = {'log': False} if 'accuracy' in loss_names else {}
-            enc_losses = self.get_losses(loss_names, enc_outputs, bin_targets, indices, num_boxes, **kwargs)
-            enc_losses = {k + f'_enc': v for k, v in enc_losses.items()}
-            losses.update(enc_losses)
-
-        return losses
-
-    def get_losses(self, loss_names: List[str], outputs, targets, indices, num_boxes, **kwargs):
-        loss_map = {
-            'cls_loss': self.loss_labels,
-            'accuracy': self.loss_labels,
-            'bbox_loss': self.loss_boxes,
-            'giou_loss': self.loss_boxes,
-            'mask_loss': self.loss_masks,
-            'dice_loss': self.loss_masks,
-            'cardinality': self.loss_cardinality,
-        }
-        losses = {}
-        for loss_name in loss_names:
-            if loss_name not in losses:
-                loss_fn = loss_map[loss_name]
-                losses.update(loss_fn(outputs, targets, indices, num_boxes, **kwargs))
-
-        losses = {k: v for k, v in losses.items() if k in losses}
-        return losses
-
-    def loss_labels(self, outputs, targets, indices, num_boxes, log=True):
-        ''' 
-        Classification loss (NLL)
-        targets dicts must contain the key "labels" containing a tensor of dim [nb_target_boxes]
-        '''
-        assert 'pred_logits' in outputs
-        src_logits = outputs['pred_logits']
-
-        idx = self._get_src_permutation_idx(indices)
-        target_classes_o = torch.cat([t["labels"][J] for t, (_, J) in zip(targets, indices)])
-        target_classes = torch.full(src_logits.shape[:2], self.num_classes,
-                                    dtype=torch.int64, device=src_logits.device)
-        target_classes[idx] = target_classes_o
-
-        target_classes_onehot = torch.zeros([src_logits.shape[0], src_logits.shape[1], src_logits.shape[2] + 1],
-                                            dtype=src_logits.dtype, layout=src_logits.layout, device=src_logits.device)
-        target_classes_onehot.scatter_(2, target_classes.unsqueeze(-1), 1)
-
-        target_classes_onehot = target_classes_onehot[:,:,:-1]
-        loss_ce = sigmoid_focal_loss(src_logits, target_classes_onehot, num_boxes, alpha=self.focal_alpha, gamma=2) * src_logits.shape[1]
-        losses = {'cls_loss': loss_ce}
-
-        if log:
-            # TODO this should probably be a separate loss, not hacked in this one here
-            losses['accuracy'] = accuracy(src_logits[idx], target_classes_o)[0]
-        return losses
-
-    @torch.no_grad()
-    def loss_cardinality(self, outputs, targets, indices, num_boxes, log=True):
-        ''' 
-        Compute the cardinality error, ie the absolute error in the number of predicted non-empty boxes
-        This is not really a loss, it is intended for logging purposes only. It doesn't propagate gradients
-        '''
-        pred_logits = outputs['pred_logits']
-        device = pred_logits.device
-        tgt_lengths = torch.as_tensor([len(v["labels"]) for v in targets], device=device)
-        # Count the number of predictions that are NOT "no-object" (which is the last class)
-        card_pred = (pred_logits.argmax(-1) != pred_logits.shape[-1] - 1).sum(1)
-        card_err = F.l1_loss(card_pred.float(), tgt_lengths.float())
-        losses = {'cardinality': card_err}
-        return losses
-
-    def loss_boxes(self, outputs, targets, indices, num_boxes, log=True):
-        ''' 
-        Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
-        targets dicts must contain the key "boxes" containing a tensor of dim [nb_target_boxes, 4]
-        The target boxes are expected in format (center_x, center_y, h, w), normalized by the image size.
-        '''
-        assert 'pred_boxes' in outputs
-        idx = self._get_src_permutation_idx(indices)
-        src_boxes = outputs['pred_boxes'][idx]
-        target_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices)], dim=0)
-
-        loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction='none')
-
-        losses = {}
-        losses['bbox_loss'] = loss_bbox.sum() / num_boxes
-
-        loss_giou = 1 - torch.diag(box_ops.generalized_box_iou(
-            box_ops.box_cxcywh_to_xyxy(src_boxes),
-            box_ops.box_cxcywh_to_xyxy(target_boxes)))
-        losses['giou_loss'] = loss_giou.sum() / num_boxes
-        return losses
-
-    def loss_masks(self, outputs, targets, indices, num_boxes, log=True):
-        '''
-        Compute the losses related to the masks: the focal loss and the dice loss.
-        targets dicts must contain the key "masks" containing a tensor of dim [nb_target_boxes, h, w]
-        '''
-        assert "pred_masks" in outputs
-
-        src_idx = self._get_src_permutation_idx(indices)
-        tgt_idx = self._get_tgt_permutation_idx(indices)
-
-        src_masks = outputs["pred_masks"]
-
-        # TODO use valid to mask invalid areas due to padding in loss
-        target_masks, valid = nested_tensor_from_tensor_list([t["masks"] for t in targets]).decompose()
-        target_masks = target_masks.to(src_masks)
-
-        src_masks = src_masks[src_idx]
-        # upsample predictions to the target size
-        src_masks = interpolate(src_masks[:, None], size=target_masks.shape[-2:],
-                                mode="bilinear", align_corners=False)
-        src_masks = src_masks[:, 0].flatten(1)
-
-        target_masks = target_masks[tgt_idx].flatten(1)
-
-        losses = {"mask_loss": sigmoid_focal_loss(src_masks, target_masks, num_boxes),
-                  "dice_loss": dice_loss(src_masks, target_masks, num_boxes),
-                  }
-        return losses
-
-    def _get_src_permutation_idx(self, indices):
-        # permute predictions following indices
-        batch_idx = torch.cat([torch.full_like(src, i) for i, (src, _) in enumerate(indices)])
-        src_idx = torch.cat([src for (src, _) in indices])
-        return batch_idx, src_idx
-
-    def _get_tgt_permutation_idx(self, indices):
-        # permute targets following indices
-        batch_idx = torch.cat([torch.full_like(tgt, i) for i, (_, tgt) in enumerate(indices)])
-        tgt_idx = torch.cat([tgt for (_, tgt) in indices])
-        return batch_idx, tgt_idx
-
-
-from model.dto import LaneDetOutput
-
-
 class SegmentationCriterion(nn.Module):
     @staticmethod
     def build_from_cfg(cfg):
@@ -262,53 +42,75 @@ class SegmentationCriterion(nn.Module):
         self.loss_names = loss_names
         self.focal_alpha = focal_alpha
 
-    def forward(self, output: LaneDetOutput, target: LaneDetOutput):
-        # unpack
-        pred_cls = output.segm_logit.permute(0, 3, 1, 2)  # (B, K, H, W)
-        target_cls = target.segm_logit.argmax(dim=-1).long()  # (B, H, W)
+    def forward(self, outputs, targets):
+        """
+        outputs: List[Dict[str, Tensor]]
+            - 각 dict 안에 'pred_points', 'pred_headtail', 'pred_logits' 키 존재
+            - 각각 shape: (N, C, 6), (N, 2), (N, 1)
+        
+        targets: List[Dict[str, Tensor]]
+            - 각 dict 안에 'points', 'headtail', 'labels' 키 존재
+            - 각각 shape: (N, 6), (N, 2), (N, 1)
+        """
 
-        pred_center = output.center_point.permute(0, 3, 1, 2)  # (B, 2, H, W)
-        target_center = target.center_point.permute(0, 3, 1, 2)
+        loss = {loss_name: 0 for loss_name in self.loss_names}
+        for i, (output, target) in enumerate(zip(outputs, targets)):
+            if 'cls_loss' in self.loss_names:
+                loss['cls_loss'] += self.classification_loss(output, target)
 
-        pred_sides = [p.permute(0, 3, 1, 2) for p in output.side_points]  # 2x (B, 2, H, W)
-        target_sides = [p.permute(0, 3, 1, 2) for p in target.side_points]
+            mask = (target['segm_label'] > 0).squeeze(-1)
+            for key in target:
+                if key not in ['size', 'image_id']:
+                    target[key] = target[key][mask]  # (H, W, C) -> (N,  C)
+            for key in output:
+                output[key] = output[key][mask]
 
-        pred_ends = [p.permute(0, 3, 1, 2) for p in output.side_logits]  # 2x (B, 1, H, W)
-        target_ends = [p.permute(0, 3, 1, 2) for p in target.side_logits]
+            straight_match = self.matcher(output, target)
+            if 'end_loss' in self.loss_names:
+                loss['end_loss'] += self.endness_loss(output, target, straight_match)
+            if 'point_loss' in self.loss_names:
+                loss['point_loss'] += self.point_loss(output, target, straight_match)
 
-        # (optional) importance map 생성 (ARSL 적용 시)
-        # importance_map = self.rsn(image, pred_cls.softmax(dim=1))  # (B, 1, H, W)
+        return loss
 
-        # --------- LOSS 계산 ---------
-        # 1. segmentation loss
-        segm_loss = F.cross_entropy(pred_cls, target_cls, reduction='none').unsqueeze(1)
+    def classification_loss(self, output, target):
+        target_label = target['segm_label'].squeeze(-1)
+        output_logit = output['segm_logit'].permute(2, 0, 1).contiguous()  # (H, W, C) -> (C, H, W)
+        output_logit = output_logit.unsqueeze(0)  # (1, C, H, W)
+        target_label = target_label.unsqueeze(0).long()  # (1, H, W)
+        loss_cls = F.cross_entropy(output_logit, target_label, reduction='mean')
+        return loss_cls
 
-        # 2. center point loss
-        center_loss = F.smooth_l1_loss(pred_center, target_center, reduction='none').mean(1, keepdim=True)
+    def endness_loss(self, output, target, straight_match: torch.Tensor):
+        stacked_original = torch.stack([output['left_end_logit'], output['right_end_logit']], dim=1)  # (N, 2, 2)
+        stacked_swapped = torch.stack([output['right_end_logit'], output['left_end_logit']], dim=1)
+        condition = (straight_match == 1).view(output['left_end_logit'].shape[0], 1, 1)
+        aligned_logits = torch.where(condition, stacked_original, stacked_swapped)
+        stacked_target = torch.stack([target['left_end'], target['right_end']], dim=1)
+        loss = F.binary_cross_entropy_with_logits(aligned_logits, stacked_target, reduction='mean')
+        return loss
 
-        # 3. side point loss + 존재 여부 mask
-        is_not_start = (target_ends[0] < 0.5).float()
-        is_not_end = (target_ends[1] < 0.5).float()
+    def point_loss(self, output, target, straight_match: torch.Tensor):
+        """
+        output['xxx_point']: (N,2)
+        staight_match: (N,)
+        """
+        center_loss = F.smooth_l1_loss(output['center_point'], target['center_point'], reduction='mean')
 
-        side_loss_prev = F.smooth_l1_loss(pred_sides[0], target_sides[0], reduction='none').mean(1, keepdim=True) * is_not_start
-        side_loss_next = F.smooth_l1_loss(pred_sides[1], target_sides[1], reduction='none').mean(1, keepdim=True) * is_not_end
+        stacked_original = torch.stack([output['left_point'], output['right_point']], dim=1)  # (N, 2, 2)
+        stacked_swapped = torch.stack([output['right_point'], output['left_point']], dim=1)
+        condition = (straight_match == 1).view(output['center_point'].shape[0], 1, 1)  # (N, 1, 1)
+        aligned_points = torch.where(condition, stacked_original, stacked_swapped)
+        stacked_target = torch.stack([target['left_point'], target['right_point']], dim=1)
+        aligned_dist = torch.norm(aligned_points - stacked_target, dim=2).sum(dim=1)     # [N]
 
-        # 4. direction loss (center → next)
-        dir_loss = direction_loss(pred_center, pred_sides[1], target_center, target_sides[1], mask=is_not_end)
+        # 더 짧은 방향을 선택했는지 확인
+        straight_dist = torch.norm(stacked_original - stacked_target, dim=2).sum(dim=1)  # [N]
+        reverse_dist = torch.norm(stacked_swapped - stacked_target, dim=2).sum(dim=1)    # [N]
+        min_dist = torch.minimum(straight_dist, reverse_dist)  # [N]
+        correct = (aligned_dist == min_dist)                   # [N], bool
+        assert correct.sum().item() == correct.shape[0], \
+            f"matcher verification failed: {correct.sum().item()} != {correct.shape[0]}"
 
-        # 5. start/end classification (BCE)
-        bin_pred = torch.cat(pred_ends, dim=1)      # Bx2xHxW
-        bin_target = torch.cat(target_ends, dim=1)
-        bin_loss = F.binary_cross_entropy_with_logits(bin_pred, bin_target, reduction='none').mean(1, keepdim=True)
-
-        # 6. pixel-wise 총합 (중요도 적용 전)
-        pixel_loss = center_loss + side_loss_prev + side_loss_next + dir_loss + bin_loss + segm_loss
-
-        # 7. ARSL 적용 (optional)
-        if hasattr(self, 'rsn'):
-            importance_map = self.rsn(...)  # 예: image, pred_cls
-            total_loss = (importance_map * pixel_loss).mean()
-        else:
-            total_loss = pixel_loss.mean()
-
-        return {"loss_total": total_loss}
+        side_loss = F.smooth_l1_loss(aligned_points, stacked_target, reduction='mean')
+        return center_loss + side_loss

@@ -45,7 +45,7 @@ class ConvertDataset:
         return: a list of line splits, each split is a list of (x,y) coordinates / type: List[np.ndarray], shape: (M, 2)
         
         line_string의 각 점과 시작점(line_string[0]) 사이의 거리를 계산하여,
-        거리가 가장 큰 점을 기준으로 두 개의 선분으로 나눈다. 
+        거리가 가장 큰 점을 기준으로 두 개의 선분으로 나눈다.
         만약 가장 먼 점이 끝점(line_string[-1])이면 [line_string]을 반환한다.
         '''
         # 시작점과의 유클리드 거리를 계산

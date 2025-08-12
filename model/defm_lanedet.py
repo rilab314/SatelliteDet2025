@@ -19,23 +19,22 @@ from dataclasses import dataclass
 
 from util.misc import NestedTensor
 from util.misc import MLP, build_instance
-from util.print_util import print_data
 from model.dto import LaneDetOutput, LineString
 
 def _get_clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
 
 
-class DetrLaneDetector(nn.Module):
-    ''' This is the Deformable DETR module that performs object detection '''
+class DefmLaneDetector(nn.Module):
+
     @staticmethod
     def build_from_cfg(cfg):
         backbone = build_instance(cfg.backbone.module_name, cfg.backbone.class_name, cfg)
         transformer = build_instance(cfg.transformer.module_name, cfg.transformer.class_name, cfg)
-        model = DetrLaneDetector(backbone, transformer, 
-                                 num_classes=cfg.dataset.num_classes, 
-                                 num_feature_levels=cfg.transformer.num_feature_levels, 
-                                 )
+        model = DefmLaneDetector(backbone, transformer, 
+                             num_classes=cfg.dataset.num_classes, 
+                             num_feature_levels=cfg.transformer.num_feature_levels, 
+                             )
         device = torch.device(cfg.runtime.device)
         model.to(device)
         return model
@@ -50,34 +49,35 @@ class DetrLaneDetector(nn.Module):
         '''
         super().__init__()
         self.transformer = transformer
-        hidden_dim = transformer.d_model
+        self.hidden_dim = transformer.d_model
+        self.num_classes = num_classes
         self.num_feature_levels = num_feature_levels
-        self.input_proj = self._get_input_proj(backbone, hidden_dim, num_feature_levels)
-        self.output_proj = self._get_output_proj(hidden_dim, num_classes)
+        self.input_proj = self._get_input_proj(backbone, num_feature_levels)
+        self.output_proj = self._get_output_proj()
         self.backbone = backbone
 
-    def _get_input_proj(self, backbone, hidden_dim, num_feature_levels):
+    def _get_input_proj(self, backbone, num_feature_levels):
         if num_feature_levels > 1:
             num_backbone_outs = len(backbone.strides)
             input_proj_list = []
             for k in range(num_backbone_outs):
                 in_channels = backbone.num_channels[k]
                 input_proj_list.append(nn.Sequential(
-                    nn.Conv2d(in_channels, hidden_dim, kernel_size=1),
-                    nn.GroupNorm(32, hidden_dim),
+                    nn.Conv2d(in_channels, self.hidden_dim, kernel_size=1),
+                    nn.GroupNorm(32, self.hidden_dim),
                 ))
             for _ in range(num_feature_levels - num_backbone_outs):
                 input_proj_list.append(nn.Sequential(
-                    nn.Conv2d(in_channels, hidden_dim, kernel_size=3, stride=2, padding=1),
-                    nn.GroupNorm(32, hidden_dim),
+                    nn.Conv2d(in_channels, self.hidden_dim, kernel_size=3, stride=2, padding=1),
+                    nn.GroupNorm(32, self.hidden_dim),
                 ))
-                in_channels = hidden_dim
+                in_channels = self.hidden_dim
             input_proj = nn.ModuleList(input_proj_list)
         else:
             input_proj = nn.ModuleList([
                 nn.Sequential(
-                    nn.Conv2d(backbone.num_channels[0], hidden_dim, kernel_size=1),
-                    nn.GroupNorm(32, hidden_dim),
+                    nn.Conv2d(backbone.num_channels[0], self.hidden_dim, kernel_size=1),
+                    nn.GroupNorm(32, self.hidden_dim),
                 )])
   
         for proj in input_proj:
@@ -85,18 +85,18 @@ class DetrLaneDetector(nn.Module):
             nn.init.constant_(proj[0].bias, 0)
         return input_proj
     
-    def _get_output_proj(self, hidden_dim, num_classes):
+    def _get_output_proj(self):
         cls_proj = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.LayerNorm(self.hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, num_classes + 3)  # 3: background, right endness, left endness
+            nn.Linear(self.hidden_dim, self.num_classes + 3)  # 3: background, right endness, left endness
         )
         reg_proj = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
+            nn.Linear(self.hidden_dim, self.hidden_dim),
+            nn.LayerNorm(self.hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, 6)  # 6: xr, yr, xc, yc, xl, yl
+            nn.Linear(self.hidden_dim, 6)  # 6: xr, yr, xc, yc, xl, yl
         )
         for proj in [cls_proj, reg_proj]:
             nn.init.xavier_uniform_(proj[0].weight, gain=1)
@@ -124,26 +124,47 @@ class DetrLaneDetector(nn.Module):
             masks.append(mask)
             assert mask is not None
 
-        memory = self.transformer(srcs, masks, pos)  # [B, sum(H*W), D], e.g. [2, 12240, 256]
+        memory = self.transformer(srcs, masks, pos)
 
         feat_hw = features[0].tensors.shape[2:]
         outputs = self.process_outputs(memory, feat_hw)
         return outputs
-    
-    def process_outputs(self, memory, feat_hw) -> LaneDetOutput:
+
+    def process_outputs(self, memory, feat_hw) -> list:
+        """
+        Process the transformer outputs to generate predictions compatible with the matcher.
+        Args:
+            memory: Transformer output of shape [batch_size, num_queries, hidden_dim].
+            feat_hw: Tuple representing the height and width of the feature map (H, W).
+        Returns: TODO
+        """
         num_feat = feat_hw[0] * feat_hw[1]
         src = memory[:, :num_feat, :]
-        side_scale = 6.0
-        outputs = {}
-
+        side_scale = 4.0
+        
         cls_out = self.output_proj['cls'](src)
         cls_out = cls_out.reshape(cls_out.shape[0], feat_hw[0], feat_hw[1], -1)
-        outputs['segm_logit'] = cls_out[..., :-2]
-        outputs['side_logits'] = [cls_out[..., -2:-1], cls_out[..., -1:]]
+        segm_logit = cls_out[..., :-2]
+        left_end_logit = cls_out[..., -2:-1]
+        right_end_logit = cls_out[..., -1:]
 
         reg_out = self.output_proj['reg'](src)
         reg_out = reg_out.reshape(reg_out.shape[0], feat_hw[0], feat_hw[1], -1)
-        outputs['center_point'] = F.sigmoid(reg_out[..., :2]) * 1.2 - 0.1  # [-0.1, 1.1]
-        outputs['side_points'] = [(F.sigmoid(reg_out[..., 2:4]) - 0.5) * side_scale, (F.sigmoid(reg_out[..., 4:6]) - 0.5) * side_scale]  # [-3, 3]
-        outputs = LaneDetOutput(**outputs)
-        return outputs
+        center_point = F.sigmoid(reg_out[..., 0:2])
+        left_point = F.sigmoid(reg_out[..., 2:4]) * 3 - 1  # -1 ~ 2
+        right_point = F.sigmoid(reg_out[..., 4:6]) * 3 - 1  # -1 ~ 2
+
+        # TODO: add meshgrid, scale to 0~1
+
+        batch_size = src.shape[0]   
+        outputs_list = []
+        for i in range(batch_size):
+            outputs_list.append({
+                'segm_logit': segm_logit[i],
+                'left_end_logit': left_end_logit[i],
+                'right_end_logit': right_end_logit[i],
+                'center_point': center_point[i],
+                'left_point': left_point[i],
+                'right_point': right_point[i],
+            })
+        return outputs_list

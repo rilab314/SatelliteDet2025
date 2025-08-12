@@ -28,9 +28,9 @@ class LayerInfo:
 
 
 class TimmModel(nn.Module):
-    def __init__(self, model_name:str, output_names:List[str], pretrained=True):
+    def __init__(self, model_name:str, output_names:List[str], pretrained=True, **kwargs):
         super().__init__()
-        self._model = timm.create_model(model_name, pretrained=pretrained)
+        self._model = timm.create_model(model_name, pretrained=pretrained, **kwargs)
         self._preprocess = transforms.Compose([
             transforms.Normalize(mean=self._model.default_cfg['mean'], std=self._model.default_cfg['std'])
         ])
@@ -54,9 +54,7 @@ class TimmModel(nn.Module):
             - samples.mask: batched binary mask [B, H, W], containing 1 on padded pixels
         """
         image_tensor = self._preprocess(sample.tensors)
-        self._model.eval()
-        with torch.no_grad():
-            output = self._model(image_tensor)
+        output = self._model(image_tensor)
         return self._post_process(self._features)
     
     def _post_process(self, features):
@@ -113,6 +111,42 @@ class SwinV2_384(TimmModel):
         tensors = {}
         for name, feature in features.items():
             # (B, H, W, C) -> (B, C, H, W)
+            feature = feature.permute(0, 3, 1, 2).contiguous()
+            B, C, H, W = feature.shape
+            mask = torch.zeros((B, H, W), dtype=torch.bool).to(feature.device)
+            tensors[name] = NestedTensor(feature, mask)
+        return tensors
+
+
+class SwinV2_768(TimmModel):
+    @staticmethod
+    def build_from_cfg(cfg):
+        backbone = SwinV2_768(output_names=cfg.backbone.output_layers)
+        return build_joiner_model(backbone, cfg)
+
+    def __init__(self, output_names:List[str], pretrained=False):
+        super().__init__(model_name='swin_base_patch4_window12_384.ms_in22k', 
+                         output_names=output_names, 
+                         pretrained=pretrained, 
+                         img_size=768, 
+                         window_size=12, 
+                         always_partition=True)
+        if pretrained:
+            state_dict = timm.models.load_state_dict('swin_base_patch4_window12_384.ms_in22k', pretrained=True)
+            for k in list(state_dict.keys()):
+                if 'attn_mask' in k:
+                    del state_dict[k]
+            self._model.load_state_dict(state_dict, strict=False)
+
+        self._interm_layers = [LayerInfo(name='layer1', stride=4, channels=128, module=self._model.layers[0]),
+                               LayerInfo(name='layer2', stride=8, channels=256, module=self._model.layers[1]),
+                               LayerInfo(name='layer3', stride=16, channels=512, module=self._model.layers[2]),
+                               LayerInfo(name='layer4', stride=32, channels=1024, module=self._model.layers[3])]
+        self.set_hooks(self._interm_layers, self._output_layers)
+
+    def _post_process(self, features):
+        tensors = {}
+        for name, feature in features.items():
             feature = feature.permute(0, 3, 1, 2).contiguous()
             B, C, H, W = feature.shape
             mask = torch.zeros((B, H, W), dtype=torch.bool).to(feature.device)

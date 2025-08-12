@@ -16,14 +16,14 @@ import torch.nn.functional as F
 from torch import nn, Tensor
 from torch.nn.init import xavier_uniform_, constant_, uniform_, normal_
 
-from model.deformable_transformer import DeformableTransformerEncoder, DeformableTransformerEncoderLayer
+from model.deformable_transformer_todo import DeformableTransformerEncoder, DeformableTransformerEncoderLayer
 from model.ops.modules import MSDeformAttn
 from util.print_util import print_model, print_data
 
 
 class DeformableTransformerEncoderOnly(nn.Module):
     @staticmethod
-    def build_from_cfg(cfg):
+    def build_from_cfg(cfg):    
         return DeformableTransformerEncoderOnly(
             num_classes=cfg.dataset.num_classes,
             d_model=cfg.transformer.hidden_dim,

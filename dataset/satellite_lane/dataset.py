@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+import torch.nn.functional as F
 import json
 from tqdm import tqdm
 
@@ -21,16 +22,11 @@ class SatelliteImagesDataset(Dataset):
         self.device = torch.device(cfg.runtime.device)
         self.image_dir = str(os.path.join(cfg.dataset.path, self.split, 'images'))
         self.label_dir = str(os.path.join(cfg.dataset.path, self.split, 'labels'))
-        
-        # 이미지 파일 목록 로드
         image_files = sorted(os.listdir(self.image_dir))
-        self.image_files = [file for file in image_files if file.endswith(('.jpg', '.png', '.tif', '.tiff'))]
-        
-        # self.augment = composer_factory(cfg, split) # TODO : augment가 라벨에 적용이 잘 될지 체크
+        self.image_files = [file for file in image_files if file.endswith(('.png'))]
+        # self.augment = composer_factory(cfg, split)
         self.cfg = cfg
         self.num_classes = cfg.dataset.num_classes
-        
-        # self.block_size = 4 # TODO : 삭제할지 결정 필요
 
     def __len__(self):
         return len(self.image_files)
@@ -38,29 +34,27 @@ class SatelliteImagesDataset(Dataset):
     def __getitem__(self, idx):
         image_filename = self.image_files[idx]
         image = self.load_image(idx)
-        labels = self.load_numpy_labels(idx)
-        
+        labels = self.load_numpy_labels(idx)        
         # if self.augment:
         #     image, labels = self.apply_augmentation(image, labels)
         
         if isinstance(image, np.ndarray):
-            image = torch.from_numpy(image).float()
-        
+            image = torch.from_numpy(image.transpose(2, 0, 1)).float()
         image = image.to(self.device)
-        
-        # 라벨 데이터와 카테고리 ID 분리
         labels_tensor = torch.tensor(labels, dtype=torch.float32, device=self.device)
-        line_blocks_tensor = labels_tensor[:, :, :8]  # 라인 블록 정보
-        category_ids_tensor = labels_tensor[:, :, 8].long()  # 카테고리 ID
+
+        target_dict = dict()
+        target_dict["center_point"] = labels_tensor[:, :, :2]
+        target_dict["left_point"] = labels_tensor[:, :, 2:4]
+        target_dict["right_point"] = labels_tensor[:, :, 4:6]
+        target_dict["left_end"] = labels_tensor[:, :, 6:7]
+        target_dict["right_end"] = labels_tensor[:, :, 7:8]
+        target_dict["segm_label"] = labels_tensor[:, :, 8:]
         
         height, width = image.shape[1], image.shape[2]
-        
         return {
             'image': image,
-            'targets': {
-                'line_blocks': line_blocks_tensor,  # 라인 형태 데이터이므로 line_blocks 사용
-                'labels': category_ids_tensor       # 카테고리 ID
-            },
+            'targets': target_dict,
             'height': height,
             'width': width,
             'filename': os.path.join(self.image_dir, image_filename)
@@ -97,13 +91,9 @@ class SatelliteImagesDataset(Dataset):
         if not os.path.exists(label_path):
             raise FileNotFoundError(f"Label file not found: {label_path}")
         
-        # 라벨 데이터 로드 (H, W, 9)
         return np.load(label_path)
 
     def apply_augmentation(self, image, labels):
-        # 이미지와 라벨에 augmentation을 적용
-        
-        # 라벨 데이터와 카테고리 ID 분리
         line_blocks = labels[:, :8]
         category_ids = labels[:, 8]
         
@@ -117,7 +107,6 @@ class SatelliteImagesDataset(Dataset):
         line_blocks = transformed['line_blocks']
         category_ids = transformed['category_ids']
         
-        # 다시 합치기
         augmented_labels = np.zeros((len(category_ids), 9), dtype=np.float32)
         augmented_labels[:, :8] = line_blocks
         augmented_labels[:, 8] = category_ids

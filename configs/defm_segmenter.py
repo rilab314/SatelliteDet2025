@@ -57,7 +57,7 @@ params = dict(
     ),
     core_model=dict(
         module_name='model.deformable_segmenter',
-        class_name='DetrLaneDetector',
+        class_name='DefmLaneDetector',
     ),
     backbone=dict(
         module_name='model.backbone',
@@ -87,7 +87,7 @@ params = dict(
             topk=100,
             score_threshold=0.05),
     ),
-    matcher=dict(  # TODO : matcher 가 필요한가? 어떤 matcher가 필요한가?
+    matcher=dict(
         module_name='model.matcher',
         class_name='HungarianMatcher',
         class_cost=2,
