@@ -8,7 +8,7 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 from configs.config import CfgNode
-from datasets import build_dataset
+from dataset import build_dataset
 
 
 def create_coco_annotations(cfg, split='train', output_json='coco_annotations.json'):

@@ -46,7 +46,9 @@ def evaluate(version: int = -1):
         target_sizes, image_ids = get_sizes_and_ids(targets, outputs["pred_logits"].device)
         coco_dets = model.postprocessors["bbox"](outputs, target_sizes, image_ids)
         predictions.extend(coco_dets)
+        break
 
+    return
     pred_json = os.path.join(log_dir, "val_predictions.json")
     with open(pred_json, 'w') as f:
         json.dump(predictions, f)

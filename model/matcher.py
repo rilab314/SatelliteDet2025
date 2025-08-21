@@ -101,7 +101,26 @@ class HungarianMatcher(nn.Module):
             return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
 
 
-def build_matcher(cfg):
-    return HungarianMatcher(cost_class=cfg.matcher.class_cost,
-                            cost_bbox=cfg.matcher.bbox_cost,
-                            cost_giou=cfg.matcher.giou_cost)
+class PointMatcher(nn.Module):
+    @staticmethod
+    def build_from_cfg(cfg):
+        return PointMatcher()
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, output, target):
+        """
+        output: {'left_point': [N, 2], 'right_point': [N, 2], ...}
+        target: {'left_point': [N, 2], 'right_point': [N, 2], ...}
+        """
+        stacked_original = torch.stack([output['left_point'], output['right_point']], dim=1)  # [N, 2, 2]
+        stacked_swapped = torch.stack([output['right_point'], output['left_point']], dim=1)  # [N, 2, 2]
+        stacked_target = torch.stack([target['left_point'], target['right_point']], dim=1)  # [N, 2, 2]
+
+        straight_dist = torch.norm(stacked_original - stacked_target, dim=2).sum(dim=1)  # [N]
+        reverse_dist = torch.norm(stacked_swapped - stacked_target, dim=2).sum(dim=1)  # [N]
+        stacked_dist = torch.stack([straight_dist, reverse_dist], dim=1)  # [N, 2]
+        reverse_match = torch.argmin(stacked_dist, dim=1)  # [N]
+        straight_match = 1 - reverse_match
+        return straight_match

@@ -3,7 +3,7 @@ workspace_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname
 
 params = dict(
     dataset=dict(
-        module_name="datasets.soccer_players",
+        module_name="dataset.soccer_players",
         class_name="SoccerPlayersDataset",
         path=os.path.join(workspace_path, "dataset/soccer-players"),
         num_classes=20,

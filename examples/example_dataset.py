@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 
 import settings
-from datasets import build_dataset
+from dataset import build_dataset
 from configs.config import CfgNode
 from util.print_util import print_data
 
