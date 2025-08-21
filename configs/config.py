@@ -71,6 +71,7 @@ def load_py_config(cfg_name):
     """
     cfg_name = cfg_name.replace('.py', '').replace('/', '.').strip('.')
     cfg_name = 'configs.' + cfg_name
+    print('cfg name:', cfg_name)
     mod = importlib.import_module(cfg_name)
 
     merged_params = {}

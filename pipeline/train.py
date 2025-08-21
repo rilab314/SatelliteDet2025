@@ -41,9 +41,12 @@ def train():
     
     # 학습 진행률 표시 콜백
     progress_bar = pl.callbacks.TQDMProgressBar(refresh_rate=10)
-    
-    train_loader = create_dataloader(cfg, 'train')
-    val_loader = create_dataloader(cfg, 'val')
+    train_dataset = build_instance(cfg.dataset.module_name, cfg.dataset.class_name, cfg, split='train')
+    train_loader = create_dataloader(cfg, train_dataset, 'train')
+    print('train__loader fin')
+    exit()
+    val_dataset = build_instance(cfg.dataset.module_name, cfg.dataset.class_name, cfg, split='validation')
+    val_loader = create_dataloader(cfg, val_dataset, 'validation')
     model = build_instance(cfg.lightning_model.module_name, cfg.lightning_model.class_name, cfg)
     
     trainer = pl.Trainer(

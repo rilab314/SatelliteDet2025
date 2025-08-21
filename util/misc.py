@@ -507,7 +507,7 @@ def get_sizes_and_ids(targets, device):
     return target_sizes, image_ids
 
 
-def build_instance(module_name, class_name, cfg):
+def build_instance(module_name, class_name, cfg, **kwargs):
     module = importlib.import_module(module_name)
     class_ = getattr(module, class_name)
-    return class_.build_from_cfg(cfg)
+    return class_.build_from_cfg(cfg, **kwargs)

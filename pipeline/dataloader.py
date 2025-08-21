@@ -3,7 +3,7 @@ from typing import List
 from util.misc import nested_tensor_from_tensor_list
 from torch.utils.data import DataLoader
 from dataset import build_dataset
-from dataset.satellite_images import SatelliteImagesDataset
+from dataset.satellite_lane.satellite_images import SatelliteImagesDataset
 
 
 def custom_collate_fn_soccer_player(batch: List[dict]):
@@ -69,8 +69,12 @@ def custom_collate_fn(batch: List[dict]):
         {
             'image': Tensor(3, H, W),
             'targets': { 
-                'line_blocks': Tensor(H, W, 8), 
-                'labels': Tensor(H, W)
+                'center_point': Tensor(H, W, 2)
+                'left_point': Tensor(H, W, 2)
+                'right_point': Tensor(H, W, 2)
+                'left_end': Tensor(H, W, 1)
+                'right_end': Tensor(H, W, 1)
+                'segm_label': Tensor(H, W, 1)
             },
             'height': int,
             'width': int,
@@ -105,11 +109,10 @@ def custom_collate_fn(batch: List[dict]):
     return samples, targets
 
 
-def create_dataloader(cfg, split='train'):
+def create_dataloader(cfg, dataset, split='train'):
     """
     위성 이미지 데이터셋을 위한 특화된 데이터로더 생성 함수
     """
-    dataset = SatelliteImagesDataset(cfg, split=split)
     dataloader = DataLoader(
         dataset,
         batch_size=cfg.training.batch_size,

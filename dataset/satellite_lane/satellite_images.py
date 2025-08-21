@@ -16,17 +16,21 @@ from dataset.composer_factory import composer_factory
 
 
 class SatelliteImagesDataset(Dataset):
-    def __init__(self, cfg, split: str):
-        self.root_path = cfg.dataset.path
+    @staticmethod
+    def build_from_cfg(cfg, split):
+        dataset = SatelliteImagesDataset(cfg.dataset.path, cfg.dataset.num_classes, cfg.runtime.device, split=split)
+        return dataset
+
+    def __init__(self, dataset_path, num_classes, device, split: str):
+        self.root_path = dataset_path
         self.split = split
-        self.device = torch.device(cfg.runtime.device)
-        self.image_dir = str(os.path.join(cfg.dataset.path, self.split, 'images'))
-        self.label_dir = str(os.path.join(cfg.dataset.path, self.split, 'labels'))
+        self.device = torch.device(device)
+        self.image_dir = str(os.path.join(dataset_path, self.split, 'image')    )
+        self.label_dir = str(os.path.join(dataset_path, self.split, 'label'))
         image_files = sorted(os.listdir(self.image_dir))
         self.image_files = [file for file in image_files if file.endswith(('.png'))]
         # self.augment = composer_factory(cfg, split)
-        self.cfg = cfg
-        self.num_classes = cfg.dataset.num_classes
+        self.num_classes = num_classes
 
     def __len__(self):
         return len(self.image_files)

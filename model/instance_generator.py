@@ -63,6 +63,8 @@ class LineStringInstanceGenerator(nn.Module):
     ) -> List[List[LineString]]:
         """
         output.center_point: (B,H,W,2)
+        points: grid scale points (N, 2)
+
         """
         B = len(points)
         line_strings_per_batch: List[List[LineString]] = []
@@ -72,17 +74,22 @@ class LineStringInstanceGenerator(nn.Module):
             cls_b = class_ids[b]
             sco_b = scores[b]
             center_b = output.center_point[b]  # (H,W,2)
+            left_b = output.left_point[b]  # (H,W,2)
+            right_b = output.right_point[b]  # (H,W,2)
 
             lines_b: List[LineString] = []
             for i in range(pts_b.shape[0]):
                 y, x = pts_b[i].tolist()
-                center_offset = center_b[y, x]                 # (2,)
-                start_point = torch.tensor([y, x], dtype=center_offset.dtype) + center_offset  # (2,)
-                line_points = start_point.unsqueeze(0)         # (1,2)
+                start_point = center_b[y, x]  # (2,)
+                left_point = left_b[y, x]  # (2,)
+                right_point = right_b[y, x]  # (2,)
+                left_line_string = self.extend_line(start_point, left_point)
+                right_line_string = self.extend_line(start_point, right_point)
+                line_string = left_line_string + right_line_string
 
                 line = LineString(
                     class_id=int(cls_b[i].item()),
-                    points=line_points,
+                    points=line_string,
                     scores=float(sco_b[i].item())
                 )
                 lines_b.append(line)
